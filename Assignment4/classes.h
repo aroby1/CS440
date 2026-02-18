@@ -17,8 +17,12 @@ public:
     Record(vector<string> &fields) {
         id = stoll(fields[0]);
         name = fields[1];
-        bio = fields[2];
-        manager_id = stoll(fields[3]);
+        manager_id = stoll(fields[fields.size() - 1]);
+        bio = "";
+        for (size_t i = 2; i < fields.size() - 1; i++) {
+            if (i > 2) bio += ",";
+            bio += fields[i];
+        }
     }
 
     Record(int64_t id_, const string &name_, const string &bio_, int64_t manager_id_)
@@ -206,73 +210,91 @@ private:
 
     // Function to add a new record to an existing page in the index file
     void addRecordToIndex(int pageIndex, Page &page, Record &record) {
-        // Open index file in binary mode for updating
-        fstream indexFile(fileName, ios::binary | ios::in | ios::out);
+    fstream indexFile(fileName, ios::binary | ios::in | ios::out);
 
+    if (!indexFile) {
+        ofstream createFile(fileName, ios::binary);
+        createFile.close();
+        indexFile.open(fileName, ios::binary | ios::in | ios::out);
         if (!indexFile) {
-            ofstream createFile(fileName, ios::binary);
-            createFile.close();
-            indexFile.open(fileName, ios::binary | ios::in | ios::out);
-            if (!indexFile) {
-                cerr << "Error: Unable to open index file for adding record." << endl;
-                return;
-            }
+            cerr << "Error: Unable to open index file for adding record." << endl;
+            return;
         }
-		
-        // Load the starting page if it exists; otherwise treat it as an empty page.
-        indexFile.seekg(pageIndex * Page_SIZE, ios::beg);
-        if (!page.read_from_data_file(indexFile)) {
-            page = Page();
-        }
+    }
 
-        while (!page.insert_record_into_page(record)) {
-            if (page.overflowPointerIndex != -1) {
-                // Follow overflow chain.
-                pageIndex = page.overflowPointerIndex;
-                indexFile.seekg(pageIndex * Page_SIZE, ios::beg);
-                if (!page.read_from_data_file(indexFile)) {
-                    page = Page();
-                }
-            } else {
-                // Create a new overflow page and persist the updated pointer on current page.
-                int previousPageIndex = pageIndex;
-                page.overflowPointerIndex = nextFreePage;
+    indexFile.seekg(pageIndex * Page_SIZE, ios::beg);
+    if (!page.read_from_data_file(indexFile)) {
+        page = Page();
+    }
+    indexFile.clear();
 
-                indexFile.seekp(previousPageIndex * Page_SIZE, ios::beg);
-                page.write_into_data_file(indexFile);
-
-                pageIndex = nextFreePage;
-                nextFreePage++;
+    while (!page.insert_record_into_page(record)) {
+        if (page.overflowPointerIndex != -1) {
+            pageIndex = page.overflowPointerIndex;
+            indexFile.seekg(pageIndex * Page_SIZE, ios::beg);
+            if (!page.read_from_data_file(indexFile)) {
                 page = Page();
             }
-        }
-        indexFile.seekp(pageIndex * Page_SIZE, ios::beg);
-        page.write_into_data_file(indexFile);
+            indexFile.clear(); 
+        } else {
+            int previousPageIndex = pageIndex;
+            page.overflowPointerIndex = nextFreePage;
 
-        // Close the index file
-        indexFile.close();
+            indexFile.clear();
+            indexFile.seekp(previousPageIndex * Page_SIZE, ios::beg);
+            page.write_into_data_file(indexFile);
+
+            pageIndex = nextFreePage;
+            nextFreePage++;
+            page = Page();
+        }
     }
+    indexFile.seekp(pageIndex * Page_SIZE, ios::beg);
+    page.write_into_data_file(indexFile);
+
+    indexFile.close();
+}
 
     // Function to search for a record by ID in a given page of the index file
     void searchRecordByIdInPage(int pageIndex, int64_t id) {
         // Open index file in binary mode for reading
         ifstream indexFile(fileName, ios::binary | ios::in);
 
-        // Seek to the appropriate position in the index file
-        indexFile.seekg(pageIndex * Page_SIZE, ios::beg);
+        bool found = false;
+        int currentPageIndex = pageIndex;
+        int maxPages = nextFreePage;
 
-        // Read the page from the index file
-        Page page;
-        page.read_from_data_file(indexFile);
-
-        // TODO:
         //  - Search for the record by ID in the page
-        //  - Check for overflow pages and report if record with given ID is not found
+        while (currentPageIndex != -1 && currentPageIndex < maxPages) {
+            // Jump to the exact byte postition of the current page in the file
+            indexFile.seekg(currentPageIndex * Page_SIZE, ios::beg);
+            Page page;
+            // Read the page from the file, break out of the loop if the read fails
+            if (!page.read_from_data_file(indexFile)) break;
+
+            // Scan all records in the page and print any that match the given ID
+            for (auto &record : page.records) {
+                if (record.id == id) {
+                    record.print();
+                    found = true;
+                }
+            }
+            //  - Check for overflow pages and report if record with given ID is not found
+            currentPageIndex = page.overflowPointerIndex;
+        }
+        indexFile.close();
+
+        if (!found) {
+            cout << "Record with ID " << id << " not found." << endl;
+        }
+    
+        
     }
 
 public:
     HashIndex(string indexFileName) : nextFreePage(256), fileName(indexFileName) {
-    }
+        PageDirectory.resize(256, -1);
+}
 
     // Function to create hash index from Employee CSV file
     void createFromFile(string csvFileName) {
@@ -292,12 +314,19 @@ public:
             }
             Record record(fields);
 
-            // TODO:
-            //   - Compute hash value for the record's ID using compute_hash_value() function.
-            //   - Get the page index from PageDirectory. If it's not in PageDirectory, define a new page using nextFreePage.
-            //   - Insert the record into the appropriate page in the index file using addRecordToIndex() function.
+         //   - Compute hash value for the record's ID using compute_hash_value() function.
+        int hashValue = compute_hash_value(record.id);
 
+        //   - Get the page index from PageDirectory. If it's not in PageDirectory, define a new page using nextFreePage.
+        if (PageDirectory[hashValue] == -1) {
+            PageDirectory[hashValue] = nextFreePage;
+            nextFreePage++;
+        }
 
+         //   - Insert the record into the appropriate page in the index file using addRecordToIndex() function.
+        Page page;
+        addRecordToIndex(PageDirectory[hashValue], page, record);
+           
         }
 
         // Close the CSV file
@@ -309,11 +338,19 @@ public:
         // Open index file in binary mode for reading
         ifstream indexFile(fileName, ios::binary | ios::in);
 
-        // TODO:
         //  - Compute hash value for the given ID using compute_hash_value() function
-        //  - Search for the record in the page corresponding to the hash value using searchRecordByIdInPage() function
+        int hashValue = compute_hash_value(id);
+
+        if (PageDirectory[hashValue] == -1) {
+            cout << "Record with ID " << id << " not found." << endl;
+            indexFile.close();
+            return;
+        }
 
         // Close the index file
         indexFile.close();
+        //  - Search for the record in the page corresponding to the hash value using searchRecordByIdInPage() function
+        searchRecordByIdInPage(PageDirectory[hashValue], id);
+        
     }
 };
