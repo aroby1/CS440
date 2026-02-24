@@ -1,4 +1,3 @@
-
 #include <string>
 #include <iostream>
 #include <stdexcept>
@@ -6,19 +5,12 @@
 
 using namespace std;
 
-
-int main() {
-
-    // Create the index
-    HashIndex hashIndex("EmployeeIndex");
+int main(int argc, char* argv[]) {
+    HashIndex hashIndex("EmployeeIndex.dat");
     hashIndex.createFromFile("Employee.csv");
 
-    // Loop to lookup IDs until user is ready to quit
-    std::string searchID;
-    std::cout << "Enter the employee ID to find or type exit to terminate: ";
-    while (std::cin >> searchID && searchID != "exit") {
-        int64_t id = std::stoll(searchID);
-        std::string record;
+    for (int i = 1; i < argc; i++) {
+        int64_t id = stoll(argv[i]);
         hashIndex.findAndPrintEmployee(id);
     }
 
