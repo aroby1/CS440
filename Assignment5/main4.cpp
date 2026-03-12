@@ -153,12 +153,15 @@ int main() {
 
 
     //TO DO: PASS 1, Create sorted runs for Employee.csv using Sort_Buffer()
-
+    Sort_Buffer();
 
     //TO DO: PASS 2, Use Merge_Runs() to sort the runs and generate EmpSorted.csv
-
+    Merge_Runs();
 
     //Please delete the temporary files (runs) after you've sorted the Employee.csv
+    for (const string &run_file : run_files){
+        remove(run_file.c_str());
+    }
 
     return 0;
 }
